@@ -12,7 +12,38 @@ impl Buffer {
             cursor_col: 0,
         }
     }
+    pub fn move_left(&mut self) {
+        if self.cursor_col > 0 {
+            self.cursor_col -= 1;
+        } else if self.cursor_row > 0 {
+            self.cursor_row -= 1;
+            self.cursor_col = self.lines[self.cursor_row].len();
+        }
+    }
 
+    pub fn move_right(&mut self) {
+        let line_len = self.lines[self.cursor_row].len();
+        if self.cursor_col < line_len {
+            self.cursor_col += 1;
+        } else if self.cursor_row < self.lines.len() - 1 {
+            self.cursor_row += 1;
+            self.cursor_col = 0;
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.cursor_row > 0 {
+            self.cursor_row -= 1;
+            self.cursor_col = self.cursor_col.min(self.lines[self.cursor_row].len());
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if self.cursor_row < self.lines.len() - 1 {
+            self.cursor_row += 1;
+            self.cursor_col = self.cursor_col.min(self.lines[self.cursor_row].len());
+        }
+    }
     pub fn insert_char(&mut self, c: char) {
         let line = &mut self.lines[self.cursor_row];
         line.insert(self.cursor_col, c);

@@ -44,10 +44,7 @@ fn ui(frame: &mut Frame, app: &App) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),    // editor area (takes remaining space)
-            Constraint::Length(1), // status bar (exactly 1 line)
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
     // Editor area
@@ -65,6 +62,9 @@ fn ui(frame: &mut Frame, app: &App) {
         Mode::Insert => "INSERT",
     };
     frame.render_widget(Paragraph::new(mode_str), chunks[1]);
+
+    // Cursor position
+    frame.set_cursor_position((app.buffer.cursor_col as u16, app.buffer.cursor_row as u16));
 }
 
 fn handle_events(app: &mut App) -> std::io::Result<bool> {
@@ -77,6 +77,10 @@ fn handle_events(app: &mut App) -> std::io::Result<bool> {
                 Mode::Normal => match key.code {
                     KeyCode::Char('q') => app.should_quit = true,
                     KeyCode::Char('i') => app.mode = Mode::Insert,
+                    KeyCode::Left => app.buffer.move_left(),
+                    KeyCode::Right => app.buffer.move_right(),
+                    KeyCode::Up => app.buffer.move_up(),
+                    KeyCode::Down => app.buffer.move_down(),
                     _ => {}
                 },
                 Mode::Insert => match key.code {
@@ -84,6 +88,10 @@ fn handle_events(app: &mut App) -> std::io::Result<bool> {
                     KeyCode::Char(c) => app.buffer.insert_char(c),
                     KeyCode::Enter => app.buffer.insert_newline(),
                     KeyCode::Backspace => app.buffer.delete_char(),
+                    KeyCode::Left => app.buffer.move_left(),
+                    KeyCode::Right => app.buffer.move_right(),
+                    KeyCode::Up => app.buffer.move_up(),
+                    KeyCode::Down => app.buffer.move_down(),
                     _ => {}
                 },
             }
