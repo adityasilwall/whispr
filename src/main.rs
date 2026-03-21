@@ -1,5 +1,6 @@
 mod app;
 mod editor;
+mod notes;
 
 use app::App;
 use crossterm::{
@@ -13,16 +14,16 @@ fn main() -> std::io::Result<()> {
     // Setup
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
-
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     let mut app = App::new();
+
+    notes::ensure_notes_dir()?;
 
     // Event loop
     loop {
         terminal.draw(|frame| {
             ui(frame, &app);
         })?;
-
         if handle_events(&mut app)? {
             break;
         }
@@ -31,7 +32,6 @@ fn main() -> std::io::Result<()> {
     // Teardown
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
-
     Ok(())
 }
 
@@ -39,7 +39,8 @@ fn ui(frame: &mut Frame, app: &App) {
     use app::Mode;
     use ratatui::{
         layout::{Constraint, Direction, Layout},
-        widgets::Paragraph,
+        style::{Color, Style},
+        widgets::{Block, Borders, List, ListItem, Paragraph},
     };
 
     let chunks = Layout::default()
@@ -47,29 +48,63 @@ fn ui(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
-    // Editor area
-    let text: Vec<ratatui::text::Line> = app
-        .buffer
-        .lines
-        .iter()
-        .map(|l| ratatui::text::Line::from(l.as_str()))
-        .collect();
-    frame.render_widget(Paragraph::new(text), chunks[0]);
+    match app.mode {
+        Mode::FilePicker => {
+            let items: Vec<ListItem> = app
+                .notes
+                .iter()
+                .enumerate()
+                .map(|(i, path)| {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    let style = if i == app.selected_note {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default()
+                    };
+                    ListItem::new(name).style(style)
+                })
+                .collect();
 
-    // Status bar
-    let mode_str = match app.mode {
-        Mode::Normal => "NORMAL",
-        Mode::Insert => "INSERT",
-    };
-    frame.render_widget(Paragraph::new(mode_str), chunks[1]);
+            let list =
+                List::new(items).block(Block::default().borders(Borders::ALL).title(" Notes "));
+            frame.render_widget(list, chunks[0]);
+            frame.render_widget(
+                Paragraph::new(" ↑↓ navigate   Enter open   Esc cancel"),
+                chunks[1],
+            );
+        }
+        _ => {
+            // Editor area
+            let text: Vec<ratatui::text::Line> = app
+                .buffer
+                .lines
+                .iter()
+                .map(|l| ratatui::text::Line::from(l.as_str()))
+                .collect();
+            frame.render_widget(Paragraph::new(text), chunks[0]);
 
-    // Cursor position
-    frame.set_cursor_position((app.buffer.cursor_col as u16, app.buffer.cursor_row as u16));
+            // Status bar
+            let mode_str = match app.mode {
+                Mode::Normal => "NORMAL",
+                Mode::Insert => "INSERT",
+                Mode::FilePicker => unreachable!(),
+            };
+            let dirty_marker = if app.buffer.dirty { " [+]" } else { "" };
+            let file_name = app.buffer.file_path.as_deref().unwrap_or("untitled");
+            let status = format!("{} | {}{}", file_name, mode_str, dirty_marker);
+            frame.render_widget(Paragraph::new(status), chunks[1]);
+
+            frame.set_cursor_position((app.buffer.cursor_col as u16, app.buffer.cursor_row as u16));
+        }
+    }
 }
 
 fn handle_events(app: &mut App) -> std::io::Result<bool> {
     use app::Mode;
-    use crossterm::event::{self, Event, KeyCode};
+    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 
     if event::poll(std::time::Duration::from_millis(16))? {
         if let Event::Key(key) = event::read()? {
@@ -77,6 +112,13 @@ fn handle_events(app: &mut App) -> std::io::Result<bool> {
                 Mode::Normal => match key.code {
                     KeyCode::Char('q') => app.should_quit = true,
                     KeyCode::Char('i') => app.mode = Mode::Insert,
+                    KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.buffer.save()?;
+                    }
+                    KeyCode::Char(' ') => {
+                        app.refresh_notes()?;
+                        app.mode = Mode::FilePicker;
+                    }
                     KeyCode::Left => app.buffer.move_left(),
                     KeyCode::Right => app.buffer.move_right(),
                     KeyCode::Up => app.buffer.move_up(),
@@ -85,6 +127,9 @@ fn handle_events(app: &mut App) -> std::io::Result<bool> {
                 },
                 Mode::Insert => match key.code {
                     KeyCode::Esc => app.mode = Mode::Normal,
+                    KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.buffer.save()?;
+                    }
                     KeyCode::Char(c) => app.buffer.insert_char(c),
                     KeyCode::Enter => app.buffer.insert_newline(),
                     KeyCode::Backspace => app.buffer.delete_char(),
@@ -92,6 +137,21 @@ fn handle_events(app: &mut App) -> std::io::Result<bool> {
                     KeyCode::Right => app.buffer.move_right(),
                     KeyCode::Up => app.buffer.move_up(),
                     KeyCode::Down => app.buffer.move_down(),
+                    _ => {}
+                },
+                Mode::FilePicker => match key.code {
+                    KeyCode::Esc => app.mode = Mode::Normal,
+                    KeyCode::Up => {
+                        if app.selected_note > 0 {
+                            app.selected_note -= 1;
+                        }
+                    }
+                    KeyCode::Down => {
+                        if app.selected_note < app.notes.len().saturating_sub(1) {
+                            app.selected_note += 1;
+                        }
+                    }
+                    KeyCode::Enter => app.open_selected_note()?,
                     _ => {}
                 },
             }
