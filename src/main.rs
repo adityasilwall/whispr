@@ -86,15 +86,20 @@ fn ui(frame: &mut Frame, app: &App) {
                 .collect();
             frame.render_widget(Paragraph::new(text), chunks[0]);
 
-            // Status bar
-            let mode_str = match app.mode {
-                Mode::Normal => "NORMAL",
-                Mode::Insert => "INSERT",
-                Mode::FilePicker => unreachable!(),
+            // Status bar — changes based on mode
+            let status = match app.mode {
+                Mode::Saving => format!("Save as: {}_", app.save_input),
+                _ => {
+                    let mode_str = match app.mode {
+                        Mode::Normal => "NORMAL",
+                        Mode::Insert => "INSERT",
+                        _ => unreachable!(),
+                    };
+                    let dirty_marker = if app.buffer.dirty { " [+]" } else { "" };
+                    let file_name = app.buffer.file_path.as_deref().unwrap_or("untitled");
+                    format!("{} | {}{}", file_name, mode_str, dirty_marker)
+                }
             };
-            let dirty_marker = if app.buffer.dirty { " [+]" } else { "" };
-            let file_name = app.buffer.file_path.as_deref().unwrap_or("untitled");
-            let status = format!("{} | {}{}", file_name, mode_str, dirty_marker);
             frame.render_widget(Paragraph::new(status), chunks[1]);
 
             frame.set_cursor_position((app.buffer.cursor_col as u16, app.buffer.cursor_row as u16));
@@ -113,7 +118,13 @@ fn handle_events(app: &mut App) -> std::io::Result<bool> {
                     KeyCode::Char('q') => app.should_quit = true,
                     KeyCode::Char('i') => app.mode = Mode::Insert,
                     KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.buffer.save()?;
+                        if app.buffer.file_path.is_some() {
+                            app.buffer.save()?;
+                            app.buffer.dirty = false;
+                        } else {
+                            app.save_input.clear();
+                            app.mode = Mode::Saving;
+                        }
                     }
                     KeyCode::Char(' ') => {
                         app.refresh_notes()?;
@@ -128,7 +139,13 @@ fn handle_events(app: &mut App) -> std::io::Result<bool> {
                 Mode::Insert => match key.code {
                     KeyCode::Esc => app.mode = Mode::Normal,
                     KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.buffer.save()?;
+                        if app.buffer.file_path.is_some() {
+                            app.buffer.save()?;
+                            app.buffer.dirty = false;
+                        } else {
+                            app.save_input.clear();
+                            app.mode = Mode::Saving;
+                        }
                     }
                     KeyCode::Char(c) => app.buffer.insert_char(c),
                     KeyCode::Enter => app.buffer.insert_newline(),
@@ -152,6 +169,18 @@ fn handle_events(app: &mut App) -> std::io::Result<bool> {
                         }
                     }
                     KeyCode::Enter => app.open_selected_note()?,
+                    _ => {}
+                },
+                Mode::Saving => match key.code {
+                    KeyCode::Esc => {
+                        app.save_input.clear();
+                        app.mode = Mode::Normal;
+                    }
+                    KeyCode::Enter => app.confirm_save()?,
+                    KeyCode::Backspace => {
+                        app.save_input.pop();
+                    }
+                    KeyCode::Char(c) => app.save_input.push(c),
                     _ => {}
                 },
             }

@@ -5,6 +5,7 @@ pub enum Mode {
     Normal,
     Insert,
     FilePicker,
+    Saving,
 }
 
 pub struct App {
@@ -13,6 +14,7 @@ pub struct App {
     pub mode: Mode,
     pub notes: Vec<PathBuf>,
     pub selected_note: usize,
+    pub save_input: String,
 }
 
 impl App {
@@ -23,6 +25,7 @@ impl App {
             mode: Mode::Normal,
             notes: vec![],
             selected_note: 0,
+            save_input: String::new(),
         }
     }
 
@@ -38,6 +41,28 @@ impl App {
             self.buffer = Buffer::open(&path_str)?;
             self.mode = Mode::Normal;
         }
+        Ok(())
+    }
+
+    pub fn confirm_save(&mut self) -> std::io::Result<()> {
+        let name = self.save_input.trim().to_string();
+        if name.is_empty() {
+            self.mode = Mode::Normal;
+            return Ok(());
+        }
+
+        let file_name = if name.ends_with(".md") {
+            name
+        } else {
+            format!("{}.md", name)
+        };
+
+        let path = crate::notes::notes_dir().join(file_name);
+        self.buffer.file_path = Some(path.to_string_lossy().to_string());
+        self.buffer.save()?;
+        self.buffer.dirty = false;
+        self.save_input.clear();
+        self.mode = Mode::Normal;
         Ok(())
     }
 }
